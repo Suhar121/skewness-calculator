@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, AreaChart, Area } from 'recharts'
 import * as math from 'mathjs'
 import './App.css'
@@ -8,21 +8,29 @@ function App() {
   const [dataArray, setDataArray] = useState([])
   const [statistics, setStatistics] = useState({})
   const [error, setError] = useState('')
-
-  // Calculate statistics when data changes
-  useEffect(() => {
-    if (dataArray.length > 0) {
-      calculateStatistics()
-    }
-  }, [dataArray])
+  const [isCalculating, setIsCalculating] = useState(false)
 
   const handleDataInput = (e) => {
     const input = e.target.value
     setData(input)
-    
+    // Clear previous results when input changes
+    setStatistics({})
+    setDataArray([])
+    setError('')
+  }
+
+  const handleCalculate = useCallback(() => {
+    if (!data.trim()) {
+      setError('Please enter some data first')
+      return
+    }
+
     try {
+      setIsCalculating(true)
+      setError('')
+      
       // Parse comma-separated or space-separated numbers
-      const numbers = input
+      const numbers = data
         .split(/[,\s]+/)
         .map(s => s.trim())
         .filter(s => s !== '')
@@ -32,19 +40,31 @@ function App() {
       if (numbers.length === 0) {
         setError('Please enter valid numbers')
         setDataArray([])
+        setStatistics({})
+        return
+      }
+      
+      // Limit data size for performance
+      if (numbers.length > 1000) {
+        setError('Too many data points. Please limit to 1000 or fewer numbers.')
+        setDataArray([])
+        setStatistics({})
         return
       }
       
       setDataArray(numbers)
-      setError('')
     } catch (err) {
       setError('Invalid data format. Please use comma or space separated numbers.')
       setDataArray([])
+      setStatistics({})
+    } finally {
+      setIsCalculating(false)
     }
-  }
+  }, [data])
 
-  const calculateStatistics = () => {
-    if (dataArray.length === 0) return
+  // Memoized statistics calculation
+  const calculatedStats = useMemo(() => {
+    if (dataArray.length === 0) return {}
 
     try {
       const n = dataArray.length
@@ -61,7 +81,7 @@ function App() {
       const median = sortedData[Math.floor(n * 0.5)]
       const q3 = sortedData[Math.floor(n * 0.75)]
       
-      setStatistics({
+      return {
         count: n,
         mean: mean.toFixed(4),
         median: median.toFixed(4),
@@ -72,78 +92,95 @@ function App() {
         q3: q3.toFixed(4),
         min: Math.min(...dataArray).toFixed(4),
         max: Math.max(...dataArray).toFixed(4)
-      })
+      }
     } catch (err) {
-      setError('Error calculating statistics')
+      console.error('Error calculating statistics:', err)
+      return {}
     }
-  }
+  }, [dataArray])
 
-  const getSkewnessInterpretation = (skewness) => {
+  // Update statistics when calculated stats change
+  useEffect(() => {
+    if (Object.keys(calculatedStats).length > 0) {
+      setStatistics(calculatedStats)
+    }
+  }, [calculatedStats])
+
+  const getSkewnessInterpretation = useCallback((skewness) => {
     const skew = parseFloat(skewness)
     if (Math.abs(skew) < 0.5) return 'Approximately symmetric'
     if (skew > 0.5) return 'Right-skewed (positive skew)'
     if (skew < -0.5) return 'Left-skewed (negative skew)'
     return 'Moderately skewed'
-  }
+  }, [])
 
-  const getSkewnessColour = (skewness) => {
+  const getSkewnessColour = useCallback((skewness) => {
     const skew = parseFloat(skewness)
     if (Math.abs(skew) < 0.5) return '#10b981' // green
     if (skew > 0.5) return '#f59e0b' // amber
     if (skew < -0.5) return '#ef4444' // red
     return '#6b7280' // gray
-  }
+  }, [])
 
-  // Generate Gaussian curve data
-  const generateGaussianCurve = () => {
+  // Memoized chart data generation
+  const chartData = useMemo(() => {
+    return dataArray.map((value, index) => ({
+      index: index + 1,
+      value: value
+    }))
+  }, [dataArray])
+
+  const histogramData = useMemo(() => {
+    if (dataArray.length === 0) return []
+    
+    const distributionData = dataArray.reduce((acc, value) => {
+      const bin = Math.floor(value / 10) * 10 // Simple binning
+      const binKey = `${bin}-${bin + 10}`
+      acc[binKey] = (acc[binKey] || 0) + 1
+      return acc
+    }, {})
+
+    return Object.entries(distributionData).map(([bin, count]) => ({
+      bin: bin,
+      count: count
+    }))
+  }, [dataArray])
+
+  const gaussianData = useMemo(() => {
     if (dataArray.length === 0 || !statistics.mean || !statistics.stdDev) return []
     
-    const mean = parseFloat(statistics.mean)
-    const stdDev = parseFloat(statistics.stdDev)
-    const min = Math.min(...dataArray)
-    const max = Math.max(...dataArray)
-    const range = max - min
-    
-    // Create points for the Gaussian curve
-    const points = []
-    const step = range / 100
-    
-    for (let x = min - range * 0.1; x <= max + range * 0.1; x += step) {
-      // Gaussian function: f(x) = (1/(σ√(2π))) * e^(-((x-μ)²)/(2σ²))
-      const exponent = -Math.pow(x - mean, 2) / (2 * Math.pow(stdDev, 2))
-      const y = (1 / (stdDev * Math.sqrt(2 * Math.PI))) * Math.exp(exponent)
+    try {
+      const mean = parseFloat(statistics.mean)
+      const stdDev = parseFloat(statistics.stdDev)
+      const min = Math.min(...dataArray)
+      const max = Math.max(...dataArray)
+      const range = max - min
       
-      // Scale the y value to fit nicely on the chart
-      const scaledY = y * 1000 // Scale factor for better visualisation
+      // Create points for the Gaussian curve (limited for performance)
+      const points = []
+      const step = range / 50 // Reduced from 100 to 50 for better performance
       
-      points.push({
-        x: x,
-        gaussian: scaledY,
-        theoretical: scaledY
-      })
+      for (let x = min - range * 0.1; x <= max + range * 0.1; x += step) {
+        // Gaussian function: f(x) = (1/(σ√(2π))) * e^(-((x-μ)²)/(2σ²))
+        const exponent = -Math.pow(x - mean, 2) / (2 * Math.pow(stdDev, 2))
+        const y = (1 / (stdDev * Math.sqrt(2 * Math.PI))) * Math.exp(exponent)
+        
+        // Scale the y value to fit nicely on the chart
+        const scaledY = y * 1000 // Scale factor for better visualisation
+        
+        points.push({
+          x: x,
+          gaussian: scaledY,
+          theoretical: scaledY
+        })
+      }
+      
+      return points
+    } catch (err) {
+      console.error('Error generating Gaussian curve:', err)
+      return []
     }
-    
-    return points
-  }
-
-  const chartData = dataArray.map((value, index) => ({
-    index: index + 1,
-    value: value
-  }))
-
-  const distributionData = dataArray.reduce((acc, value) => {
-    const bin = Math.floor(value / 10) * 10 // Simple binning
-    const binKey = `${bin}-${bin + 10}`
-    acc[binKey] = (acc[binKey] || 0) + 1
-    return acc
-  }, {})
-
-  const histogramData = Object.entries(distributionData).map(([bin, count]) => ({
-    bin: bin,
-    count: count
-  }))
-
-  const gaussianData = generateGaussianCurve()
+  }, [dataArray, statistics.mean, statistics.stdDev])
 
   return (
     <div className="app">
@@ -164,9 +201,17 @@ function App() {
               placeholder="Example: 1, 2, 3, 4, 5 or 1 2 3 4 5"
               rows={4}
             />
+            <button 
+              className="calculate-btn"
+              onClick={handleCalculate}
+              disabled={isCalculating || !data.trim()}
+            >
+              {isCalculating ? '🔄 Calculating...' : '📊 Calculate Statistics'}
+            </button>
             {error && <p className="error">{error}</p>}
             <p className="help-text">
-              Enter numbers separated by commas or spaces. The calculator will automatically parse and calculate statistics.
+              Enter numbers separated by commas or spaces, then click the Calculate button.
+              {dataArray.length > 0 && <span className="data-count"> ({dataArray.length} numbers processed)</span>}
             </p>
           </div>
         </section>
