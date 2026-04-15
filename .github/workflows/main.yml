@@ -25,19 +25,28 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          elif [ -f backend/requirements.txt ]; then
-            pip install -r backend/requirements.txt
+          pip install pytest
+
+          REQUIREMENTS_FILE="$(find . -maxdepth 4 -type f -name 'requirements*.txt' \
+            ! -path './.venv/*' ! -path './venv/*' ! -path './node_modules/*' | head -n 1)"
+
+          if [ -n "$REQUIREMENTS_FILE" ]; then
+            echo "Installing dependencies from: $REQUIREMENTS_FILE"
+            pip install -r "$REQUIREMENTS_FILE"
           else
-            echo "No requirements.txt found at root or backend/requirements.txt"
-            exit 1
+            echo "No requirements*.txt found. Continuing with pytest only."
           fi
 
       - name: Run tests (if present)
         run: |
-          if [ -f backend/requirements.txt ] && [ ! -f requirements.txt ]; then
+          if [ -d tests ]; then
+            echo "Running tests from root"
+          elif [ -d backend/tests ]; then
             cd backend
+            echo "Running tests from backend/"
+          else
+            echo "No tests directory found. Skipping tests."
+            exit 0
           fi
 
           set +e
@@ -54,11 +63,14 @@ jobs:
 
       - name: Build Docker image
         run: |
-          if [ -f Dockerfile ]; then
-            docker build -t $PROJECT_NAME:latest .
-          elif [ -f backend/Dockerfile ]; then
-            docker build -t $PROJECT_NAME:latest ./backend
-          else
-            echo "No Dockerfile found at root or backend/Dockerfile"
+          DOCKERFILE_PATH="$(find . -maxdepth 4 -type f -name 'Dockerfile' \
+            ! -path './.venv/*' ! -path './venv/*' ! -path './node_modules/*' | head -n 1)"
+
+          if [ -z "$DOCKERFILE_PATH" ]; then
+            echo "No Dockerfile found. Cannot build Docker image."
             exit 1
           fi
+
+          DOCKER_CONTEXT="$(dirname "$DOCKERFILE_PATH")"
+          echo "Building Docker image using $DOCKERFILE_PATH (context: $DOCKER_CONTEXT)"
+          docker build -f "$DOCKERFILE_PATH" -t $PROJECT_NAME:latest "$DOCKER_CONTEXT"
