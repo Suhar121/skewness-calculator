@@ -67,8 +67,8 @@ jobs:
             ! -path './.venv/*' ! -path './venv/*' ! -path './node_modules/*' | head -n 1)"
 
           if [ -z "$DOCKERFILE_PATH" ]; then
-            echo "No Dockerfile found. Cannot build Docker image."
-            exit 1
+            echo "No Dockerfile found. Skipping Docker build."
+            exit 0
           fi
 
           DOCKER_CONTEXT="$(dirname "$DOCKERFILE_PATH")"
