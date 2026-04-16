@@ -5,7 +5,7 @@ on:
     branches: [main]
 
 env:
-  IMAGE: suharshr/skewness-calculator
+  IMAGE: your-dockerhub-username/skewness-calculator
   APP_NAME: skewness-calculator
   APP_PORT: 3000
   HOST_PORT: 80
