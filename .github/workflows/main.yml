@@ -26,10 +26,10 @@ jobs:
       - name: Install dependencies
         run: |
           if [ -f package.json ]; then
-            npm ci
+            npm install
           elif [ -f frontend/package.json ]; then
             cd frontend
-            npm ci
+            npm install
           else
             echo "No package.json found at root or frontend/package.json"
             exit 1
